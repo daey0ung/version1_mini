@@ -6,12 +6,13 @@ from collections import deque
 from detect_stopped_car import detect_highway_stopped_vehicle
 from get_speed_direction import detect_car_direction
 from get_wrong_way_and_speeding import wrong_way_drive, get_real_speed
+import time
 
 # from recording import recording
 
 
-file_path = f"./videos/b.mp4"
-
+file_path = f"./videos/h.mp4"
+cctv_id = 4
 cap = cv2.VideoCapture(file_path)
 
 
@@ -23,7 +24,7 @@ one_second = 1 * 7 / fps
 
 
 model = YOLO("best1.pt")
-
+model1 = YOLO("yolov8n.pt")
 # 실시간으로 6초 180개의 frame을 저장할 리스트 dq 설정
 dq = deque(maxlen=180)
 frame_num = 0
@@ -53,10 +54,39 @@ while cap.isOpened():
     if not success:
         break
 
+    # =================================================================
+    # =======================  오토바이 & 사람 탐지  =====================
+    # =================================================================
+
+
+    # 사람과 오토바이 탐지 YOLO 모델 적용
+    detect_motorcycle = model1.track(frame, verbose=False, persist=True, classes=[0, 3])
+
+    for box in detect_motorcycle[0].boxes:
+        if box.id is None:
+            continue
+        else:
+            M_id = int(box.id)
+            cls = int(box.cls)
+            mx, my, _, _ = box.xywh[0].tolist()
+            date_time = datetime.now()
+            file_name = (
+                f"motorcycle_people_{date_time.strftime("%Y_%m_%d_%H_%M_%S")}"
+            )
+            recording_start[M_id] = [(frame_num + 90) % 180, file_name, mx, my]
+            # column = ["type", "direction", "speed", "datetime", "illegal", "file_name"]
+
+            if cls == 0:
+                print('경고! 고속도로 위에서 사람 발견')
+
+            elif cls == 3:
+                print('경고! 고속도로 위에서 오토바이 발견')
+
+
     # 분석하지 않는 화면 하얀색으로 전처리
 
-    frame[:200, :] = 255
-    frame[430:, :] = 255  # 화면 상단 하얀색으로 전처리
+    frame[:200, :] = 255  # 화면 상단 하얀색으로 전처리
+
 
     results = model.track(
         frame, verbose=False, conf=0.7, persist=True, classes=[0, 1, 2]
@@ -80,6 +110,9 @@ while cap.isOpened():
         # =================================================================
         # ========================  불법 주정차 탐지 =========================
         # =================================================================
+
+        # 탐지 구역 지정:  이유: 탐지된 차량이 화면을 빠져나갈 때, 박스 라벨링 왜곡으로 오류 발생. 특히 트럭, 버스
+
 
         # 고속도로 위 정차되어 있는 차량 탐지.
         try:
@@ -136,32 +169,6 @@ while cap.isOpened():
             df.loc[tid, "datetime"] = data_time
 
 
-        #
-        # a = Car_info()
-        #
-        # a.add(id, cx, cy)
-        #
-        # # Road_env
-        # Road_env = adjust_speed(cx)
-        # if Road_env is not None:
-        #     center_guide_line, df_down, df_up = Road_env
-        #     d = Road_info()
-        #     d.add(
-        #         center_guide_line, df_down, df_up
-        #     )  # ty:ignore[too-many-positional-arguments]
-        #     print(df_down)
-        #     print(df_up)
-        #
-        # # 속도 보정
-        # # if speed is not none or False:
-        # #      car_speed = df.loc[tid, "speed"]
-        # #      car_direction = df.loc[tid, "direction"]
-        # #     adjust_speed(tid, cx, cy, car_direction, car_speed)
-        # # 0. 필요한 파라메타 tid, cx, cy, speed
-        # # 1. 상행선, 하행선 따로 cx, cy로 50개 수집후 cx 최댓값과 cx최솟값의 중앙값을 중앙선으로 선정,
-        # # 2. 중앙값에서  차선을 고려해서,일정 간격으로 분류(차선과 동일한 개념. 단, 임의로 나눔. 이유는 차선탐지를 하지 않았기 때문)
-        # # 3. 나눈 가상의 차선별로 평균값을 구하고, 선형회귀를 하여, 속력을 보정하단.
-        #
 
         # ==========================================================================
         # ==============================  역방향 탐지와 및 속력 보정 =============================
@@ -256,12 +263,11 @@ while cap.isOpened():
 
 
 # 데이터를 주기적으로 엑셀파일로 방출한다.
+file_excel = f'./results/highway_traffic{cctv_id}_{int(time.time())}.xlsx'
+df.to_excel(file_excel, index=False)
 
 
-# DB로 데이터를 저장한다.
-
-columns = ["ID", "type", "direction", "speed", "datetime", "alarm", "file_name"]
-
+# DB로 저장한다.
 
 cap.release()
 cv2.destroyAllWindows()
